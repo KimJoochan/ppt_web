@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>관리자 · 내용 편집</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+
+<script src="data.js"></script>
+<script src="save.js" onerror="console.info('save.js 없음')"></script>
+<script src="store.js"></script>
+
+<style>
+  body { font-family: 'Pretendard Variable', Pretendard, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; }
+  .field  { width: 100%; border-radius: .6rem; border: 2px solid #e2e8f0; padding: .6rem .8rem;
+            font-size: .95rem; font-weight: 500; color: #0f172a; background: #fff; }
+  .field:focus { outline: none; border-color: #0f172a; }
+  textarea.field { line-height: 1.7; resize: vertical; }
+  .lbl { display: block; margin-bottom: .35rem; font-size: .8rem; font-weight: 800; color: #64748b; }
+  .hint { margin-top: .3rem; font-size: .75rem; color: #94a3b8; }
+  .toast-in { animation: toastIn .25s ease both; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+
+<!-- ===================== 상단 바 ===================== -->
+<header class="sticky top-0 z-40 border-b-2 border-slate-200 bg-white/95 backdrop-blur">
+  <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-4">
+    <div>
+      <h1 class="text-xl font-extrabold tracking-tight">관리자 · 내용 편집</h1>
+      <p class="mt-1 text-xs font-semibold text-slate-500">
+        현재 데이터 : <span id="srcLabel" class="rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-700"></span>
+        <span class="mx-1 text-slate-300">·</span>
+        용량 <span id="sizeLabel" class="font-bold text-slate-700"></span>
+        <span id="dirtyLabel" class="ml-2 hidden font-bold text-amber-600">● 저장하지 않은 변경</span>
+      </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="index.html"
+         class="rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-slate-300">
+        미리보기
+      </a>
+      <div class="hidden">
+        <button id="btnExport"
+          class="rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-slate-300">
+          save.js 내보내기
+        </button>
+        <button id="btnImport"
+          class="rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-slate-300">
+          불러오기
+        </button>
+      </div>
+
+      <button id="btnReset" title="이 브라우저에 저장된 내용을 지우고 data.js 기본값으로 되돌립니다"
+        class="rounded-lg border-2 border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 active:scale-95">
+        초기화
+      </button>
+
+      <button id="btnSave"
+        class="rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-extrabold text-white transition hover:bg-slate-700 active:scale-95">
+        저장
+      </button>
+    </div>
+  </div>
+
+  <!-- 탭 -->
+  <div class="mx-auto flex max-w-5xl gap-1 px-5">
+    <button data-tab="themes"  class="tab border-b-4 px-4 py-3 text-sm font-extrabold transition">카드 · 글</button>
+    <button data-tab="notices" class="tab border-b-4 px-4 py-3 text-sm font-extrabold transition">공지사항</button>
+    <!-- <button data-tab="config"  class="tab border-b-4 px-4 py-3 text-sm font-extrabold transition">그리드 설정</button> -->
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-5 py-8">
+  <section id="tab-themes"  class="tabpane space-y-5"></section>
+  <section id="tab-notices" class="tabpane hidden space-y-5"></section>
+  <section id="tab-config"  class="tabpane hidden space-y-5"></section>
+</main>
+
+<div id="toast" class="pointer-events-none fixed bottom-6 left-1/2 z-50 hidden -translate-x-1/2">
+  <div id="toastBox" class="toast-in rounded-xl bg-slate-900 px-6 py-3.5 text-sm font-bold text-white shadow-2xl"></div>
+</div>
+
+<input id="fileInput" type="file" accept=".js,.json,application/json,text/javascript" class="hidden">
+
+<script>
+/* =============================================================================
+   0) 최초 1회 초기화
+   -----------------------------------------------------------------------------
+   data.js 의 기본 내용을 새로 바꾼 뒤에도, 예전에 [저장] 해 둔 localStorage 값이
+   계속 우선해서 옛 내용이 보이는 것을 막습니다.
+
+   · 이 브라우저에서 "딱 한 번만" 실행됩니다. 그 뒤로는 저장한 내용이 그대로 남습니다.
+   · 나중에 data.js 를 또 갈아엎고 강제로 한 번 더 비우고 싶으면
+     아래 RESET_TAG 의 날짜만 바꾸면 됩니다.
+   ============================================================================= */
+const RESET_TAG = 'pm.reset.2026-09-10';
+let didReset = false;
+
+try {
+  if (!localStorage.getItem(RESET_TAG)) {
+    didReset = !!localStorage.getItem(PM.KEY);   // 실제로 지울 게 있었는지
+    localStorage.removeItem(PM.KEY);
+    localStorage.setItem(RESET_TAG, '1');
+  }
+} catch (e) {
+  console.warn('[admin] 초기화를 건너뜁니다 (저장소를 쓸 수 없음)', e);
+}
+
+/* =============================================================================
+   1) 상태
+   ============================================================================= */
+let D = PM.raw();          // 편집 중인 원본 데이터
+let dirty = false;
+
+const COLORS = window.PM_COLORS;
+const ICONS  = window.PM_ICONS;
+
+const $  = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function markDirty() {
+  dirty = true;
+  $('#dirtyLabel').classList.remove('hidden');
+  refreshSize();
+}
+
+function refreshSize() { $('#sizeLabel').textContent = PM.usage(D).text; }
+
+function refreshSource() {
+  const map = { localStorage: '저장본 (이 브라우저)', 'save.js': 'save.js (배포본)', 'data.js': 'data.js (기본값)' };
+  $('#srcLabel').textContent = map[PM.source()] || PM.source();
+  refreshSize();
+}
+
+function toast(msg) {
+  const t = $('#toast'), box = $('#toastBox');
+  box.textContent = msg;
+  t.classList.remove('hidden');
+  box.classList.remove('toast-in'); void box.offsetWidth; box.classList.add('toast-in');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.add('hidden'), 2600);
+}
+
+/* 경로로 값 넣기 : setPath(D, 'themes.0.article.title', '제목') */
+function setPath(obj, path, value) {
+  const keys = path.split('.');
+  let cur = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (cur[keys[i]] == null) cur[keys[i]] = {};
+    cur = cur[keys[i]];
+  }
+  cur[keys[keys.length - 1]] = value;
+}
+
+/* =============================================================================
+   2) 공통 입력 요소
+   ============================================================================= */
+function text(path, value, label, hint) {
+  return `<label class="block">
+    <span class="lbl">${label}</span>
+    <input class="field" type="text" data-path="${path}" value="${esc(value)}">
+    ${hint ? `<span class="hint">${hint}</span>` : ''}
+  </label>`;
+}
+
+function num(path, value, label, hint) {
+  return `<label class="block">
+    <span class="lbl">${label}</span>
+    <input class="field" type="number" data-path="${path}" data-type="number" value="${esc(value)}">
+    ${hint ? `<span class="hint">${hint}</span>` : ''}
+  </label>`;
+}
+
+function area(path, value, label, rows, hint, type = '') {
+  return `<label class="block">
+    <span class="lbl">${label}</span>
+    <textarea class="field" rows="${rows}" data-path="${path}" ${type ? `data-type="${type}"` : ''}>${esc(value)}</textarea>
+    ${hint ? `<span class="hint">${hint}</span>` : ''}
+  </label>`;
+}
+
+function select(path, value, label, options) {
+  return `<label class="block">
+    <span class="lbl">${label}</span>
+    <select class="field" data-path="${path}">
+      ${options.map(o => `<option value="${esc(o.v)}" ${o.v === value ? 'selected' : ''}>${esc(o.t)}</option>`).join('')}
+    </select>
+  </label>`;
+}
+
+function check(path, value, label) {
+  return `<label class="flex cursor-pointer items-center gap-2.5 rounded-lg border-2 border-slate-200 bg-white px-4 py-3">
+    <input type="checkbox" class="h-5 w-5 accent-slate-900" data-path="${path}" data-type="bool" ${value ? 'checked' : ''}>
+    <span class="text-sm font-bold text-slate-700">${label}</span>
+  </label>`;
+}
+
+const colorOptions = () => Object.entries(COLORS).map(([k, v]) => ({ v: k, t: v.label }));
+const iconOptions  = () => Object.entries(ICONS).map(([k, v]) => ({ v: k, t: v.label }));
+
+function sectionAdd(action, label) {
+  return `<button data-action="${action}"
+    class="w-full rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 px-5 py-4 text-sm font-extrabold text-slate-500 transition hover:border-slate-400 hover:text-slate-700">
+    + ${label}
+  </button>`;
+}
+
+/* =============================================================================
+   3) 이미지 등록 (data 코드로 변환)
+   ============================================================================= */
+const MAX_PX = 900;      // 가장 긴 변 기준 축소 크기
+const QUALITY = 0.85;    // JPEG 품질
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    /* 이미지만 등록할 수 있습니다 (영상은 지원하지 않습니다) */
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('이미지 파일만 등록할 수 있습니다.\n(jpg, png, gif, webp 등)'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('파일을 읽지 못했습니다'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('이미지를 열지 못했습니다'));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_PX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d');
+        cx.fillStyle = '#ffffff';
+        cx.fillRect(0, 0, w, h);
+        cx.drawImage(img, 0, 0, w, h);
+
+        resolve(cv.toDataURL('image/jpeg', QUALITY));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function pickImage(index) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    fileToDataUrl(file)
+      .then(url => {
+        D.themes[index].media = url;
+        markDirty();
+        renderThemes();
+        toast(`이미지를 등록했습니다 · 약 ${Math.round(url.length / 1024)} KB`);
+      })
+      .catch(err => alert(err.message));
+  };
+  input.click();
+}
+
+/* 미리보기 (이미지 data 코드 / 이미지 파일명 / 빈 값) */
+function mediaPreview(t) {
+  const src = t.media || '';
+
+  if (!src) {
+    return `<div class="grid h-24 w-24 shrink-0 place-items-center rounded-full border-2 border-dashed border-slate-300 text-xs font-bold text-slate-400">없음</div>`;
+  }
+  return `<img src="${esc(src)}" alt="" class="h-24 w-24 shrink-0 rounded-full object-cover ring-2 ring-slate-200">`;
+}
+
+function mediaLabel(src) {
+  if (!src) return '등록된 이미지 없음';
+  if (src.startsWith('data:')) return `업로드한 이미지 · 약 ${Math.round(src.length / 1024)} KB`;
+  return `이미지 파일 : ${src}`;
+}
+
+/* =============================================================================
+   4) 탭별 화면 그리기
+   ============================================================================= */
+function renderThemes() {
+  const cols = Number(D.grid.cols) || 3;
+
+  $('#tab-themes').innerHTML = `
+    <p class="rounded-xl bg-white px-5 py-4 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
+      카드는 아래 순서대로 <b class="text-slate-700">${cols}열 그리드</b>에 자동 배치됩니다.
+      위치를 직접 지정할 필요가 없고, <b class="text-slate-700">↑ ↓</b> 로 순서만 바꾸면 됩니다.
+    </p>`
+    + D.themes.map((t, i) => {
+      const row = Math.floor(i / cols) + 1, col = (i % cols) + 1;
+      return `
+    <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+      <div class="mb-5 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <span class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-extrabold text-slate-500">${row}행 ${col}열</span>
+          <span class="h-4 w-4 rounded-full ${(COLORS[t.color] || COLORS.slate).dot}"></span>
+          <h2 class="text-lg font-extrabold">${esc(t.name) || '(이름 없음)'}</h2>
+        </div>
+        <div class="flex items-center gap-1">
+          <button data-action="theme-up"     data-i="${i}" class="rounded-lg border-2 border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:border-slate-300">↑</button>
+          <button data-action="theme-down"   data-i="${i}" class="rounded-lg border-2 border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:border-slate-300">↓</button>
+          <button data-action="theme-remove" data-i="${i}" class="rounded-lg border-2 border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-500 hover:bg-rose-50">삭제</button>
+        </div>
+      </div>
+
+      <!-- 이미지 -->
+      <div class="flex flex-wrap items-center gap-5 rounded-xl bg-slate-50 p-5">
+        ${mediaPreview(t)}
+        <div class="min-w-[16rem] flex-1">
+          <p class="text-xs font-extrabold tracking-widest text-slate-400">이미지</p>
+          <p class="mt-1.5 text-sm font-bold text-slate-700">${esc(mediaLabel(t.media))}</p>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button data-action="media-pick" data-i="${i}"
+              class="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-700 active:scale-95">
+              이미지 등록
+            </button>
+            <button data-action="media-clear" data-i="${i}"
+              class="rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-500 transition hover:border-slate-300">
+              지우기
+            </button>
+          </div>
+
+          <div class="mt-3 hidden">
+            ${text(`themes.${i}.media`, t.media && t.media.startsWith('data:') ? '' : (t.media || ''),
+                   '또는 이미지 파일명 직접 입력',
+                   '같은 폴더에 둔 이미지 파일 이름을 적습니다 (예: photo.jpg)')}
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 sm:grid-cols-2">
+        ${text(`themes.${i}.name`, t.name, '카드 이름', '확대했을 때 미디어 아래에 표시됩니다')}
+        ${select(`themes.${i}.color`, t.color, '색상', colorOptions())}
+      </div>
+
+      <div class="mt-6 rounded-xl bg-slate-50 p-5">
+        <p class="mb-4 text-xs font-extrabold tracking-widest text-slate-400">글 내용</p>
+        ${text(`themes.${i}.article.title`, t.article.title, '제목', '지도의 키워드 칩과 팝업 제목에 함께 쓰입니다')}
+        <div class="mt-4">
+          ${text(`themes.${i}.article.subtitle`, t.article.subtitle, '서브제목', '제목 아래 큰 글씨로 나옵니다')}
+        </div>
+        <div class="mt-4">
+          ${area(`themes.${i}.article.body`, (t.article.body || []).join('\n\n'), '본문', 10,
+                 '빈 줄 하나로 문단을 나눕니다', 'paras')}
+        </div>
+      </div>
+    </div>`;
+    }).join('')
+    + sectionAdd('theme-add', '카드 추가');
+}
+
+function renderNotices() {
+  $('#tab-notices').innerHTML = `
+    <p class="rounded-xl bg-white px-5 py-4 text-sm font-semibold text-slate-500 ring-1 ring-slate-200">
+      모든 글을 읽으면 <b class="text-slate-700">공지사항 보기</b> 버튼이 나타나고, 아래 순서대로 한 장씩 넘어갑니다.
+      제목·설명에는 <code class="rounded bg-slate-100 px-1">&lt;br&gt;</code> 로 줄바꿈,
+      <code class="rounded bg-slate-100 px-1">&lt;span class="text-amber-700"&gt;글자&lt;/span&gt;</code> 로 색 강조를 넣을 수 있습니다.
+    </p>`
+    + D.notices.map((n, i) => `
+    <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+      <div class="mb-5 flex items-center justify-between gap-4">
+        <h2 class="text-lg font-extrabold">${i + 1}번째 장</h2>
+        <div class="flex items-center gap-1">
+          <button data-action="notice-up"     data-i="${i}" class="rounded-lg border-2 border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:border-slate-300">↑</button>
+          <button data-action="notice-down"   data-i="${i}" class="rounded-lg border-2 border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:border-slate-300">↓</button>
+          <button data-action="notice-remove" data-i="${i}" class="rounded-lg border-2 border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-500 hover:bg-rose-50">삭제</button>
+        </div>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-3">
+        ${text(`notices.${i}.kicker`, n.kicker, '작은 라벨', '예: 공지 1 · 시험 안내')}
+        ${select(`notices.${i}.icon`, n.icon, '아이콘', iconOptions())}
+        ${select(`notices.${i}.iconColor`, n.iconColor, '아이콘 색', colorOptions())}
+      </div>
+
+      <div class="mt-4">${area(`notices.${i}.title`, n.title, '큰 문구', 3)}</div>
+      <div class="mt-4">${area(`notices.${i}.desc`, n.desc, '보조 문구 (선택)', 2)}</div>
+
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        ${check(`notices.${i}.box`, n.box, '노란 강조 상자로 감싸기')}
+        ${check(`notices.${i}.chips`, n.chips, '아래에 카드 제목 칩 붙이기')}
+      </div>
+      <div class="mt-4">
+        ${text(`notices.${i}.badge`, n.badge, '강조 상자 라벨', '강조 상자를 켠 경우에만 표시됩니다')}
+      </div>
+    </div>`).join('')
+    + sectionAdd('notice-add', '공지 장 추가');
+}
+
+function renderConfig() {
+  const g = D.grid;
+  const cols = Number(g.cols) || 3;
+  const n = D.themes.length;
+  const rows = Math.max(1, Math.ceil(n / cols));
+
+  /* 배치 미리보기 */
+  let preview = '';
+  for (let r = 0; r < rows; r++) {
+    const items = D.themes.slice(r * cols, r * cols + cols);
+    preview += `<div class="flex justify-center gap-2">${items.map(t => `
+      <div class="flex w-28 flex-col items-center gap-1 rounded-xl border-2 border-slate-200 bg-white p-2">
+        <span class="h-3 w-3 rounded-full ${(COLORS[t.color] || COLORS.slate).dot}"></span>
+        <span class="truncate text-[11px] font-bold text-slate-600">${esc(t.name)}</span>
+      </div>`).join('')}</div>`;
+  }
+
+  $('#tab-config').innerHTML = `
+    <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="mb-5 text-lg font-extrabold">그리드 설정</h2>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        ${num('grid.cols', g.cols, '열 수', '기본 3열')}
+        ${num('grid.cellW', g.cellW, '가로 간격', '권장 600~800')}
+        ${num('grid.cellH', g.cellH, '세로 간격', '권장 550~700')}
+        ${num('chip.dist', D.chip.dist, '제목 칩 거리', '권장 180~280')}
+      </div>
+
+      <div class="mt-7">
+        <p class="mb-3 text-xs font-extrabold tracking-widest text-slate-400">배치 미리보기</p>
+        <div class="space-y-2 rounded-xl bg-slate-50 p-5">${preview || '<p class="text-sm text-slate-400">카드가 없습니다</p>'}</div>
+        <p class="hint mt-3">마지막 줄이 덜 차면 가운데로 모아 배치됩니다. 순서는 [카드 · 글] 탭에서 바꿉니다.</p>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="mb-3 text-lg font-extrabold">저장 방식 안내</h2>
+      <ul class="space-y-2.5 text-sm font-semibold leading-relaxed text-slate-600">
+        <li><b class="text-slate-900">저장</b> — 이 브라우저에만 저장됩니다(localStorage, 약 5MB). 내 컴퓨터에서 바로 확인할 때 사용합니다.</li>
+        <li><b class="text-slate-900">save.js 내보내기</b> — 저장한 내용을 파일로 받습니다. 받은 <code class="rounded bg-slate-100 px-1">save.js</code> 를
+            <code class="rounded bg-slate-100 px-1">index.html</code> 과 같은 폴더에 두면 다른 사람 컴퓨터에서도 같은 내용이 보입니다.</li>
+        <li><b class="text-slate-900">이미지</b> — 등록하면 파일이 아니라 data 코드로 저장되어 save.js 안에 함께 들어갑니다.
+            자동으로 긴 변 ${MAX_PX}px로 줄여 넣습니다.</li>
+        <li><b class="text-slate-900">영상</b> — 지원하지 않습니다. 카드에는 이미지만 넣을 수 있습니다.</li>
+      </ul>
+    </div>`;
+}
+
+const RENDER = { themes: renderThemes, notices: renderNotices, config: renderConfig };
+let tab = 'themes';
+
+function renderTabs() {
+  document.querySelectorAll('.tab').forEach(b => {
+    const on = b.dataset.tab === tab;
+    b.className = 'tab border-b-4 px-4 py-3 text-sm font-extrabold transition '
+                + (on ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600');
+  });
+  document.querySelectorAll('.tabpane').forEach(p =>
+    p.classList.toggle('hidden', p.id !== 'tab-' + tab));
+  RENDER[tab]();
+}
+
+/* =============================================================================
+   5) 입력 반영
+   ============================================================================= */
+document.addEventListener('input', e => {
+  const el = e.target.closest('[data-path]');
+  if (!el) return;
+
+  let v = el.type === 'checkbox' ? el.checked : el.value;
+
+  switch (el.dataset.type) {
+    case 'number': v = Number(v) || 0; break;
+    case 'paras':  v = v.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean); break;
+  }
+
+  /* 파일명 칸을 비워둔 채로 두면, 이미 등록한 이미지를 지우지 않습니다 */
+  if (/^themes\.\d+\.media$/.test(el.dataset.path) && v === '') {
+    const idx = Number(el.dataset.path.split('.')[1]);
+    if ((D.themes[idx].media || '').startsWith('data:')) return;
+  }
+
+  setPath(D, el.dataset.path, v);
+  markDirty();
+});
+
+/* =============================================================================
+   6) 버튼 동작
+   ============================================================================= */
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action], [data-tab]');
+  if (!btn) return;
+
+  if (btn.dataset.tab) { tab = btn.dataset.tab; renderTabs(); return; }
+
+  const i = Number(btn.dataset.i);
+  const move = (arr, from, to) => {
+    if (to < 0 || to >= arr.length) return;
+    arr.splice(to, 0, arr.splice(from, 1)[0]);
+  };
+
+  switch (btn.dataset.action) {
+    case 'media-pick':  pickImage(i); return;
+    case 'media-clear':
+      if (!confirm('등록된 이미지를 지울까요?')) return;
+      D.themes[i].media = ''; break;
+
+    case 'theme-add':
+      D.themes.push({
+        id: 'card' + Date.now(), name: '새 카드', media: '', color: 'slate',
+        article: { title: '새 제목', subtitle: '', body: [''] },
+      });
+      break;
+    case 'theme-remove':
+      if (!confirm('이 카드를 삭제할까요?')) return;
+      D.themes.splice(i, 1); break;
+    case 'theme-up':   move(D.themes, i, i - 1); break;
+    case 'theme-down': move(D.themes, i, i + 1); break;
+
+    case 'notice-add':
+      D.notices.push({ kicker: '공지 ' + (D.notices.length + 1), icon: 'bell', iconColor: 'slate',
+                       title: '내용을 입력하세요', desc: '', box: false, badge: '', chips: false });
+      break;
+    case 'notice-remove':
+      if (!confirm('이 공지 장을 삭제할까요?')) return;
+      D.notices.splice(i, 1); break;
+    case 'notice-up':   move(D.notices, i, i - 1); break;
+    case 'notice-down': move(D.notices, i, i + 1); break;
+
+    default: return;
+  }
+
+  markDirty();
+  RENDER[tab]();
+});
+
+/* ---- 저장 ---- */
+$('#btnSave').addEventListener('click', () => {
+  const r = PM.save(D);
+  if (r.ok) {
+    dirty = false;
+    $('#dirtyLabel').classList.add('hidden');
+    refreshSource();
+    toast('저장했습니다 · 미리보기에서 확인하세요');
+  } else {
+    alert(r.message);
+  }
+});
+
+/* ---- save.js 내보내기 ---- */
+$('#btnExport').addEventListener('click', () => {
+  PM.download('save.js', PM.toSaveJs(D));
+  toast('save.js 를 내려받았습니다 · index.html 옆에 두세요');
+});
+
+/* ---- 불러오기 ---- */
+$('#btnImport').addEventListener('click', () => $('#fileInput').click());
+
+$('#fileInput').addEventListener('change', ev => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const txt = String(reader.result).trim();
+      /* save.js 형태(window.PM_SAVED = {...};) 와 순수 JSON 을 모두 받습니다 */
+      const start = txt.indexOf('{');
+      const end   = txt.lastIndexOf('}');
+      if (start === -1 || end === -1) throw new Error('데이터를 찾을 수 없습니다');
+      D = JSON.parse(txt.slice(start, end + 1));
+      markDirty();
+      renderTabs();
+      toast('불러왔습니다 · [저장]을 눌러야 반영됩니다');
+    } catch (err) {
+      alert('파일을 읽지 못했습니다.\n' + err.message);
+    }
+    ev.target.value = '';
+  };
+  reader.readAsText(file, 'utf-8');
+});
+
+/* ---- 초기화 (localStorage 비우기 + 기본값 복원) ---- */
+$('#btnReset').addEventListener('click', () => {
+  const has = PM.source() === 'localStorage';
+  const msg = has
+    ? '이 브라우저에 저장된 내용을 모두 지웁니다.\n\n'
+      + '· 지금까지 [저장] 한 편집 내용과 등록한 이미지가 사라집니다.\n'
+      + '· data.js 의 기본값으로 되돌아갑니다.\n'
+      + '· 되돌릴 수 없습니다.\n\n'
+      + '계속할까요?'
+    : '저장된 내용이 없습니다.\ndata.js 의 기본값으로 다시 불러올까요?';
+
+  if (!confirm(msg)) return;
+
+  PM.clear();
+  D = PM.defaults();
+  dirty = false;
+  $('#dirtyLabel').classList.add('hidden');
+  refreshSource();
+  renderTabs();
+  toast(has ? '저장된 내용을 지우고 기본값으로 되돌렸습니다' : '기본값을 다시 불러왔습니다');
+});
+
+/* ---- 저장하지 않고 나갈 때 경고 ---- */
+window.addEventListener('beforeunload', e => {
+  if (!dirty) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+/* ---- 시작 ---- */
+refreshSource();
+renderTabs();
+if (didReset) toast('저장돼 있던 예전 내용을 비우고 기본값으로 시작합니다');
+</script>
+</body>
+</html>
